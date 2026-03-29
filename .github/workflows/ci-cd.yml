@@ -1,0 +1,166 @@
+name: CI/CD — Autonomous ETL Agent
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  GCP_REGION: us-central1
+  IMAGE_NAME: etl-agent-api
+  CLOUD_RUN_SERVICE: etl-agent-api
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Lint & unit tests
+  # ---------------------------------------------------------------------------
+  test:
+    name: Lint & Unit Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run isort
+        run: isort --check-only src/ tests/
+
+      - name: Run black
+        run: black --check src/ tests/
+
+      - name: Run pylint
+        run: pylint src/ --fail-under=7.0 --disable=C0114,C0115,C0116
+
+      - name: Run mypy
+        run: mypy src/ --ignore-missing-imports
+
+      - name: Run unit tests
+        env:
+          # Minimal env vars needed for config to load without real credentials
+          ANTHROPIC_API_KEY: test_key
+          GCP_PROJECT_ID: test_project
+          GCS_RAW_BUCKET: test-raw
+          GCS_PROCESSED_BUCKET: test-processed
+          GCS_ARTIFACTS_BUCKET: test-artifacts
+          DATAPROC_STAGING_BUCKET: test-staging
+          GITHUB_TOKEN: test_token
+          GITHUB_REPO_OWNER: test_owner
+          GITHUB_REPO_NAME: test_repo
+          API_KEY: test_api_key
+        run: |
+          pytest tests/agents/ -v \
+            --cov=src \
+            --cov-report=xml \
+            --cov-report=term-missing \
+            -m "not integration"
+
+      - name: Upload coverage report
+        uses: codecov/codecov-action@v4
+        if: always()
+        with:
+          files: coverage.xml
+          fail_ci_if_error: false
+
+  # ---------------------------------------------------------------------------
+  # Build & push Docker image (only on push to main)
+  # ---------------------------------------------------------------------------
+  build-and-push:
+    name: Build & Push Docker Image
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    permissions:
+      contents: read
+      id-token: write    # Required for Workload Identity Federation
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker ${{ env.GCP_REGION }}-docker.pkg.dev --quiet
+
+      - name: Build Docker image
+        run: |
+          docker build \
+            -f infra/docker/Dockerfile \
+            -t ${{ env.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ env.IMAGE_NAME }}/api:${{ github.sha }} \
+            -t ${{ env.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ env.IMAGE_NAME }}/api:latest \
+            .
+
+      - name: Push Docker image
+        run: |
+          docker push ${{ env.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ env.IMAGE_NAME }}/api:${{ github.sha }}
+          docker push ${{ env.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ env.IMAGE_NAME }}/api:latest
+
+  # ---------------------------------------------------------------------------
+  # Deploy to Cloud Run (only on push to main)
+  # ---------------------------------------------------------------------------
+  deploy:
+    name: Deploy to Cloud Run
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    environment: production
+
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Deploy to Cloud Run
+        run: |
+          gcloud run deploy ${{ env.CLOUD_RUN_SERVICE }} \
+            --image ${{ env.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ env.IMAGE_NAME }}/api:${{ github.sha }} \
+            --region ${{ env.GCP_REGION }} \
+            --platform managed \
+            --service-account ${{ secrets.GCP_SERVICE_ACCOUNT }} \
+            --no-allow-unauthenticated \
+            --max-instances 5 \
+            --memory 2Gi \
+            --cpu 2 \
+            --quiet
+
+      - name: Get Cloud Run URL
+        run: |
+          URL=$(gcloud run services describe ${{ env.CLOUD_RUN_SERVICE }} \
+            --region ${{ env.GCP_REGION }} \
+            --format 'value(status.url)')
+          echo "Deployed to: $URL"
+          echo "CLOUD_RUN_URL=$URL" >> $GITHUB_ENV
+
+      - name: Smoke test deployed service
+        run: |
+          sleep 10
+          curl -f "${{ env.CLOUD_RUN_URL }}/health" || exit 1

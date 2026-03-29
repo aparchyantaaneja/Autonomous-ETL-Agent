@@ -1,0 +1,141 @@
+# =============================================================================
+# ETL Framework Configuration
+# Defines standards, naming conventions, and quality rules for generated code.
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# Naming Conventions
+# Applied to all generated tables, columns, and files.
+# ---------------------------------------------------------------------------
+naming_conventions:
+  table_prefix: "tbl_"
+  view_prefix: "vw_"
+  staging_prefix: "stg_"
+  column_case: "snake_case"              # snake_case | camelCase | PascalCase
+  partition_column: "ingestion_date"
+  audit_columns:
+    - created_at
+    - updated_at
+    - source_system
+    - batch_id
+
+# ---------------------------------------------------------------------------
+# Data Quality Rules
+# Enforced in generated test suites and pipeline validation steps.
+# ---------------------------------------------------------------------------
+quality_rules:
+  min_test_coverage: 0.80               # Minimum pytest coverage threshold
+  require_null_checks: true             # Assert no nulls in key columns
+  require_schema_validation: true       # Validate schema before write
+  require_dedup_check: true             # Warn if duplicates found after dedupe
+  max_null_pct_threshold: 0.05          # Fail if key column null % exceeds 5%
+  row_count_anomaly_pct: 0.20           # Alert if row count changes by > 20%
+
+# ---------------------------------------------------------------------------
+# Spark / PySpark Standards
+# ---------------------------------------------------------------------------
+spark:
+  write_mode: "delta"                   # delta | parquet | csv
+  default_parallelism: 200
+  shuffle_partitions: 200
+  partition_strategy: "ingestion_date"  # Column used for partitioning
+  cache_intermediate_results: false     # Enable for iterative transformations
+  enable_adaptive_query_execution: true
+  delta_options:
+    merge_schema: true
+    overwrite_schema: false
+  optimization_hints:
+    broadcast_threshold_mb: 100        # Auto-broadcast joins below this size
+
+# ---------------------------------------------------------------------------
+# Delta Lake Standards
+# CRUD operation templates used by the code generation agent.
+# ---------------------------------------------------------------------------
+delta_lake:
+  default_table_format: "delta"
+  checkpoint_location_prefix: "gs://{artifacts_bucket}/checkpoints/"
+  vacuum_retain_hours: 168              # 7 days
+  merge_key_columns:                    # Default merge keys if not specified
+    - id
+    - created_at
+  history_retention_days: 30
+
+# ---------------------------------------------------------------------------
+# Code Generation Standards
+# Rules injected into code generation prompts.
+# ---------------------------------------------------------------------------
+code_generation:
+  language: "pyspark"                   # pyspark | scala
+  style_guide: "pep8"
+  max_function_lines: 50
+  docstring_format: "google"            # google | numpy | sphinx
+  error_handling: "explicit"            # explicit | suppress
+  logging_library: "structlog"
+  # Operations the agent should recognize and generate
+  supported_operations:
+    - filter
+    - join
+    - aggregate
+    - dedupe
+    - enrich
+    - upsert
+    - pivot
+    - unpivot
+    - window_function
+    - schema_cast
+
+# ---------------------------------------------------------------------------
+# Test Generation Standards
+# Rules injected into test generation prompts.
+# ---------------------------------------------------------------------------
+test_generation:
+  framework: "pytest"                   # pytest | unittest
+  fixture_strategy: "spark_session"     # Use shared SparkSession fixture
+  required_test_types:
+    - schema_validation
+    - null_check
+    - row_count_assertion
+    - business_logic
+    - dedup_check
+  mock_data_rows: 100                   # Rows in generated test fixtures
+  coverage_report_format: "html"
+
+# ---------------------------------------------------------------------------
+# PR / GitHub Standards
+# ---------------------------------------------------------------------------
+pr_standards:
+  branch_prefix: "etl/auto/"            # e.g., etl/auto/STORY-42
+  commit_message_format: "feat(etl): {story_id} - {summary}"
+  pr_title_format: "[AUTO] {story_id}: {title}"
+  required_pr_sections:
+    - Summary
+    - ETL Operations
+    - Generated Files
+    - Test Coverage
+    - Deployment Instructions
+  auto_assign_reviewers: false
+  auto_label: true
+  labels:
+    - auto-generated
+    - etl-pipeline
+    - needs-review
+
+# ---------------------------------------------------------------------------
+# Business Domain Configuration
+# Campaign analytics defaults for the Amazon iPhone 17 use case.
+# ---------------------------------------------------------------------------
+business_domain:
+  default_use_case: "campaign_analytics"
+  rfm_config:
+    recency_days_threshold: 90
+    frequency_min_orders: 3
+    monetary_min_revenue: 100.0
+  geo_config:
+    default_granularity: "region"       # region | state | city | zipcode
+    geo_column: "shipping_region"
+  campaign_config:
+    attribution_window_days: 30
+    conversion_events:
+      - purchase
+      - add_to_cart
+      - product_view

@@ -1,0 +1,45 @@
+[
+  {
+    "id": "STORY-001",
+    "title": "Clean and filter customer data",
+    "description": "Remove customers with null email addresses and filter to only active customers (status = 'active'). Drop duplicate customer records based on customer_id. Write the cleaned dataset to the customers_clean Delta Lake table.",
+    "acceptance_criteria": [
+      "No null email_address values in output",
+      "Only records with status = 'active' are included",
+      "No duplicate customer_id values",
+      "Output written to Delta Lake at gs://processed/customers_clean"
+    ],
+    "labels": ["data-quality", "customers"],
+    "deploy_to_dataproc": false,
+    "generate_airflow_dag": false
+  },
+  {
+    "id": "STORY-002",
+    "title": "Join orders with customers and aggregate monthly revenue",
+    "description": "Join the orders table with the customers table on customer_id. Filter to orders placed in the last 90 days. Aggregate total revenue and order count by customer_region and month. Upsert results into the monthly_revenue_summary Delta Lake table.",
+    "acceptance_criteria": [
+      "Join is a left join preserving all orders",
+      "Only orders from last 90 days included",
+      "Revenue aggregated by (region, year, month)",
+      "Delta merge upsert on (region, year, month) key"
+    ],
+    "labels": ["revenue", "analytics", "join"],
+    "deploy_to_dataproc": false,
+    "generate_airflow_dag": false
+  },
+  {
+    "id": "STORY-003",
+    "title": "Amazon iPhone 17 campaign — RFM segmentation and geo analytics",
+    "description": "Build an RFM (Recency, Frequency, Monetary) customer segmentation pipeline for the iPhone 17 launch campaign. Source data: customer transactions table and customer profile table. Steps: (1) calculate recency in days since last purchase, frequency as order count, monetary as total spend; (2) assign RFM scores 1-5 using ntile; (3) classify customers into High/Medium/Low value segments; (4) join with customer profile to get shipping_region; (5) aggregate segment counts and revenue by region; (6) upsert final campaign intent scores to campaign_rfm_segments Delta table.",
+    "acceptance_criteria": [
+      "RFM scores calculated correctly using ntile(5) window functions",
+      "Customers segmented into High (RFM >= 12), Medium (>= 8), Low (< 8)",
+      "Geographic aggregation by shipping_region",
+      "Delta merge on customer_id as key",
+      "Schema includes: customer_id, rfm_score, segment, shipping_region, total_revenue"
+    ],
+    "labels": ["campaign", "rfm", "geo-analytics", "iphone-17"],
+    "deploy_to_dataproc": false,
+    "generate_airflow_dag": true
+  }
+]
