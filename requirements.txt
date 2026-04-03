@@ -2,7 +2,7 @@
 langchain==0.3.0
 langchain-anthropic==0.3.0
 langchain-community==0.3.0
-langgraph==0.2.0
+langgraph==0.2.38
 
 # LLM
 anthropic==0.40.0
@@ -58,7 +58,7 @@ pytest-mock==3.14.0
 black==24.8.0
 pylint==3.2.0
 mypy==1.11.0
-isort==5.13.0
+isort==5.13.2
 
 # Logging / observability
 structlog==24.4.0

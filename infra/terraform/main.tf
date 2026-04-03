@@ -37,6 +37,7 @@ resource "google_project_service" "required_apis" {
     "artifactregistry.googleapis.com",
     "logging.googleapis.com",
     "iam.googleapis.com",
+    "compute.googleapis.com",
   ])
   service            = each.value
   disable_on_destroy = false
@@ -193,6 +194,8 @@ resource "google_dataproc_cluster" "etl_agent" {
   name   = "etl-agent-cluster"
   region = var.region
 
+  depends_on = [google_project_service.required_apis]
+
   cluster_config {
     staging_bucket = google_storage_bucket.artifacts.name
 
@@ -224,6 +227,7 @@ resource "google_dataproc_cluster" "etl_agent" {
     }
 
     gce_cluster_config {
+      zone            = "us-central1-b"
       service_account = google_service_account.dataproc_worker.email
       service_account_scopes = [
         "https://www.googleapis.com/auth/cloud-platform",
@@ -329,4 +333,4 @@ resource "google_cloud_run_v2_service_iam_member" "public_invoker" {
   name     = google_cloud_run_v2_service.etl_agent_api.name
   role     = "roles/run.invoker"
   member   = "allUsers"
-}
+}s

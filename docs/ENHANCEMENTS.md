@@ -76,6 +76,8 @@ Right now the pipeline marks itself as complete right after creating the PR — 
 
 Every new story is treated completely from scratch. I want the AI to **remember past pipelines** that were accepted and use them as examples when generating new code. This makes the output progressively better aligned with the patterns I prefer. Plan is to use Vertex AI Vector Search to store and retrieve similar past pipelines.
 
+> **Note:** Agent Memory helps with *new* pipelines being generated in a consistent style with past ones. It does not directly handle modifying an existing pipeline — that is covered by Enhancement #9 below.
+
 ---
 
 ### 5. Automated Data Quality Checks (Great Expectations)
@@ -106,10 +108,61 @@ No visual overview of pipeline health right now. I want to build a **Cloud Monit
 
 ---
 
+### 9. Incremental Pipeline Enhancement with Knowledge Store
+**Priority: Top — implement this first in Phase 2**
+
+This solves one of the most common real-world data engineering needs: **you already have a pipeline running in production and you want to add something to it** — a new column, a new transformation step, a new output dataset — without rewriting it from scratch.
+
+Currently the only option is to submit a brand new story and generate a completely new pipeline, which creates duplication and doesn't touch the existing code at all.
+
+**The request would look like this:**
+```
+"In the customer_segments pipeline (run abc-123), also calculate average order
+ value per customer and add it as a new column avg_order_value in the output."
+```
+
+**Phase 2 — Basic approach (implement first):**
+1. Fetch the existing PySpark script from GCS
+2. Send the full script + change request to Claude: *"make only this one change, preserve everything else"*
+3. Validate the modified code (syntax + structural checks)
+4. Open a PR showing a diff — only the changed lines — against the current version
+
+This works well for scripts under ~500 lines and is straightforward to build on top of Phase 1.
+
+**Phase 3 — Knowledge Store approach (the smarter upgrade):**
+
+Rather than dumping the whole script into the prompt, build a **semantic index** of each pipeline when it is first created. Every pipeline gets broken into logical chunks and stored with metadata:
+
+| What gets indexed | Example entry |
+|---|---|
+| Transformation steps | `aggregate: RFM scores per customer using ntile(4)` |
+| Column lineage | `total_spend and order_count exist; avg_order_value does not` |
+| Output schema | `customer_id, shipping_region, rfm_total, customer_segment` |
+| Business rules | `exclude cancelled orders (status != 'cancelled')` |
+
+When an enhancement request comes in, instead of sending the full file:
+1. **Query the knowledge store** with the enhancement description → retrieve only the relevant sections (e.g. the aggregation block, the output schema)
+2. **Send Claude a focused, targeted prompt** rather than ~1000 lines of code
+3. **Apply the change surgically** to only the relevant section
+
+**What the knowledge store unlocks beyond just editing:**
+- **Conflict detection** — catch "this column already exists" before calling Claude at all
+- **Cross-pipeline reuse** — "a similar calculation exists in pipeline XYZ, reuse that pattern"
+- **Impact analysis** — "if I change the order_count aggregation, these 3 downstream pipelines are affected"
+- **Natural language search** — "which of my pipelines already does RFM scoring?"
+
+**Technology:** Vertex AI Vector Search (already on GCP, no new infrastructure needed)
+
+**Why this is different from Agent Memory (#4):**
+Agent Memory helps *new* pipelines look like past ones — it's about style consistency. This enhancement actually *modifies a specific existing pipeline*. They complement each other: Agent Memory ensures the new code follows your conventions, the Knowledge Store ensures it integrates cleanly with the existing logic.
+
+---
+
 ## Summary
 
 | # | Feature | Priority | Status |
 |---|---|---|---|
+| 9 | Incremental Pipeline Enhancement + Knowledge Store | **Top** | Pending |
 | 1 | Conversational Agent + Jira Integration | High | Pending |
 | 2 | Persistent Run History (Firestore) | High | Pending |
 | 3 | Wait for PR Approval Before Deploying | Medium | Pending |
